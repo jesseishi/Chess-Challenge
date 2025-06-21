@@ -1,5 +1,4 @@
 ﻿using ChessChallenge.API;
-using ChessChallenge.Application;
 using System;
 
 public class MyBot : IChessBot
@@ -9,14 +8,17 @@ public class MyBot : IChessBot
 
     public Move Think(Board board, Timer timer)
     {
-        Move[] moves = board.GetLegalMoves();
+        // TODO: Check some examples to see if it is better to make this stackallow shared between calls.
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves);
+
         Move bestMove = moves[0];
         int bestEval = int.MinValue;
 
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -Minimax(board, 3, false);
+            int eval = -AlphaBeta(board, 4, int.MinValue + 1, int.MaxValue - 1);
             board.UndoMove(move);
 
             if (eval > bestEval)
@@ -29,41 +31,38 @@ public class MyBot : IChessBot
         return bestMove;
     }
 
-    private int Minimax(Board board, int depth, bool capturesOnly)
+    // TODO: Add some stuff like transposition tables, iterative deepening, and quiescence search.
+    private int AlphaBeta(Board board, int depth, int alpha, int beta)
     {
-        // Are we done?
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
-        {
-            // If we searched for all possible moves, let's now do a quienscence search until we've finished all captions.
-            // So infinite depth and with captuersOnly = true.
-            if (!capturesOnly)
-                // We did not play any moves, so we don't negate the evaluation.
-                return Minimax(board, 2, true); // Start quiescence search
-
-            // Else, we've finished the quienscence search and can return the evaluation.
             return Evaluate(board);
-        }
+
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves);
 
         int bestEval = int.MinValue;
-        Move[] moves = board.GetLegalMoves(capturesOnly);
+
         if (moves.Length == 0)
-        {
             return Evaluate(board);
-        }
 
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -Minimax(board, depth - 1, capturesOnly);
+            int eval = -AlphaBeta(board, depth - 1, -beta, -alpha);
             board.UndoMove(move);
 
             if (eval > bestEval)
                 bestEval = eval;
+            if (bestEval > alpha)
+                alpha = bestEval;
+            if (alpha >= beta)
+                break; // Beta cutoff
         }
 
         return bestEval == int.MinValue ? Evaluate(board) : bestEval;
     }
 
+    // TODO: Would be cool to improve this evaluation function.
     private int Evaluate(Board board)
     {
         int eval = EvaluateForWhite(board);
@@ -74,14 +73,14 @@ public class MyBot : IChessBot
     private int EvaluateForWhite(Board board)
     {
         if (board.IsInCheckmate())
-            return board.IsWhiteToMove ? int.MinValue : -int.MaxValue;
+            return board.IsWhiteToMove ? -10000 : 10000;
         if (board.IsDraw())
             return 0;
 
         int eval = 0;
-        eval += EvaluateMaterial(board);
-        //eval += EvaluateKnightCentralization(board);
-        //eval += EvaluatePawnAdvancement(board);
+        eval += 2 * EvaluateMaterial(board);
+        eval += EvaluateKnightCentralization(board);
+        eval += EvaluatePawnAdvancement(board);
 
         return eval;
     }
