@@ -1,68 +1,82 @@
 ﻿using ChessChallenge.API;
 using System;
+using System.ComponentModel;
+using System.IO;
+using System.Net.Http;
 
 public class MyBot : IChessBot
 {
     // Piece values: Pawn, Knight, Bishop, Rook, Queen, King
     private static readonly int[] pieceValues = { 0, 1, 3, 3, 5, 9, 0 };
+    const int maxDepth = 3;
+    Move moveToPlay = Move.NullMove;
 
     public Move Think(Board board, Timer timer)
     {
-        // TODO: Check some examples to see if it is better to make this stackallow shared between calls.
-        Span<Move> moves = stackalloc Move[256];
-        board.GetLegalMovesNonAlloc(ref moves);
-
-        Move bestMove = moves[0];
-        int bestEval = int.MinValue;
-
-        foreach (Move move in moves)
-        {
-            board.MakeMove(move);
-            int eval = -AlphaBeta(board, 4, int.MinValue + 1, int.MaxValue - 1);
-            board.UndoMove(move);
-
-            if (eval > bestEval)
-            {
-                bestEval = eval;
-                bestMove = move;
-            }
-        }
-
-        return bestMove;
+        Search(board, maxDepth, int.MinValue + 1, int.MaxValue - 1);
+        return moveToPlay;
     }
 
-    // TODO: Add some stuff like transposition tables, iterative deepening, and quiescence search.
-    private int AlphaBeta(Board board, int depth, int alpha, int beta)
+    // TODO: Combine with Quiesce search into 1 function.
+    // Inspired from: https://www.chessprogramming.org/Alpha-Beta
+    private int Search(Board board, int depth, int alpha, int beta)
     {
         if (depth == 0 || board.IsInCheckmate() || board.IsDraw())
-            return Evaluate(board);
+            return Quiesce(board, alpha, beta);
 
         Span<Move> moves = stackalloc Move[256];
         board.GetLegalMovesNonAlloc(ref moves);
+        foreach (Move move in moves)
+        {
+            // Make a move and recurse.
+            board.MakeMove(move);
+            int score = -Search(board, depth - 1, -beta, -alpha);
+            board.UndoMove(move);
 
-        int bestEval = int.MinValue;
+            // Check if this is a bad branch or if we found a new best move.
+            if (score >= beta)
+                return beta;
+            if (score > alpha)
+            {
+                alpha = score;
+                if (depth == maxDepth)
+                    moveToPlay = move;
+            }
+        }
+        return alpha;
+    }
 
-        if (moves.Length == 0)
-            return Evaluate(board);
+    // Inspired from: https://www.chessprogramming.org/Quiescence_Search
+    private int Quiesce(Board board, int alpha, int beta)
+    {
+        int staticEval = Evaluate(board);
 
+        // Stand Pat
+        int bestValue = staticEval;
+        if (bestValue >= beta)
+            return bestValue;
+        if (bestValue > alpha)
+            alpha = bestValue;
+
+        Span<Move> moves = stackalloc Move[256];
+        board.GetLegalMovesNonAlloc(ref moves, true);
         foreach (Move move in moves)
         {
             board.MakeMove(move);
-            int eval = -AlphaBeta(board, depth - 1, -beta, -alpha);
+            int score = -Quiesce(board, -beta, -alpha);
             board.UndoMove(move);
 
-            if (eval > bestEval)
-                bestEval = eval;
-            if (bestEval > alpha)
-                alpha = bestEval;
-            if (alpha >= beta)
-                break; // Beta cutoff
+            if (score >= beta)
+                return score;
+            if (score > bestValue)
+                bestValue = score;
+            if (score > alpha)
+                alpha = score;
         }
 
-        return bestEval == int.MinValue ? Evaluate(board) : bestEval;
+        return bestValue;
     }
 
-    // TODO: Would be cool to improve this evaluation function.
     private int Evaluate(Board board)
     {
         int eval = EvaluateForWhite(board);
@@ -78,7 +92,7 @@ public class MyBot : IChessBot
             return 0;
 
         int eval = 0;
-        eval += 2 * EvaluateMaterial(board);
+        eval += 10 * EvaluateMaterial(board);
         eval += EvaluateKnightCentralization(board);
         eval += EvaluatePawnAdvancement(board);
 
